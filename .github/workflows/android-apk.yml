@@ -13,6 +13,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -32,7 +33,10 @@ jobs:
       - name: Install Android SDK components
         shell: bash
         run: |
+          set -euo pipefail
+
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/.android/sdk}}"
+
           echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
 
@@ -47,9 +51,15 @@ jobs:
       - name: Verify Android SDK
         shell: bash
         run: |
+          set -euo pipefail
+
+          echo "Android SDK: $ANDROID_HOME"
+          echo "Java SDK: $JAVA_HOME"
+
           test -d "$ANDROID_HOME/platform-tools"
           test -d "$ANDROID_HOME/platforms/android-34"
           test -d "$ANDROID_HOME/build-tools/34.0.0"
+
           java -version
           sdkmanager --version
 
@@ -63,27 +73,118 @@ jobs:
       - name: Verify Godot installation
         shell: bash
         run: |
+          set -euo pipefail
+
           godot --version
+
           test -d "$HOME/.local/share/godot/export_templates/4.3.stable"
 
-      - name: Verify project
+      - name: Configure Godot Android export
         shell: bash
         run: |
-          godot --headless --path . --editor --quit
+          set -euo pipefail
+
+          : "${ANDROID_HOME:?Android SDK path is missing}"
+          : "${JAVA_HOME:?Java SDK path is missing}"
+
+          mkdir -p "$HOME/.config/godot"
+          mkdir -p "$HOME/.android"
+
+          keytool -genkeypair \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -keypass android \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/debug_keystore = "$HOME/.android/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOF
+
+          echo "Godot Android export settings configured."
+          test -f "$HOME/.android/debug.keystore"
+
+      - name: Verify project scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          godot --headless --path . --editor --quit \
+            2>&1 | tee /tmp/godot-verify.log
+
+          if grep -E \
+            "SCRIPT ERROR:|Parse Error:|Failed to load script" \
+            /tmp/godot-verify.log; then
+            echo "Godot script verification failed."
+            exit 1
+          fi
+
+          echo "Project verification completed."
+
+      - name: Prepare Android export preset
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f export_presets.cfg
+
+          if ! grep -q 'name="Android"' export_presets.cfg; then
+            echo "Android export preset was not found."
+            exit 1
+          fi
+
+          # Ensure the debug APK is signed for installation.
+          sed -i \
+            's/^package\/signed=false$/package\/signed=true/' \
+            export_presets.cfg
+
+          # SDK overrides require Gradle export in Godot 4.3.
+          sed -i \
+            '/^gradle_build\/min_sdk=/d; /^gradle_build\/target_sdk=/d' \
+            export_presets.cfg
+
+          echo "Android export preset checked."
 
       - name: Export Android debug APK
         shell: bash
         run: |
+          set -euo pipefail
+
           mkdir -p build
-          godot --headless --path . \
+
+          godot --headless --verbose --path . \
             --export-debug "Android" \
-            build/BharatOpenWorld-debug.apk
+            build/BharatOpenWorld-debug.apk \
+            2>&1 | tee /tmp/godot-export.log
+
+          test -s build/BharatOpenWorld-debug.apk
 
       - name: Verify APK
         shell: bash
         run: |
-          test -s build/BharatOpenWorld-debug.apk
-          file build/BharatOpenWorld-debug.apk
+          set -euo pipefail
+
+          APK="build/BharatOpenWorld-debug.apk"
+
+          test -s "$APK"
+          file "$APK"
+
+          if ! unzip -t "$APK"; then
+            echo "The exported APK is not a valid ZIP/APK archive."
+            exit 1
+          fi
+
+          echo "APK created successfully."
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
