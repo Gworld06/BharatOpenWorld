@@ -212,79 +212,38 @@ jobs:
 
       
 
-      - name: Apply Indian art asset patch v2
+    
+      - name: Apply Indian art asset patch v3
         shell: bash
         run: |
           set -euo pipefail
-          PATCH="BharatOpenWorld_IndianAssetsPatch_v2.zip"
+          PATCH="BharatOpenWorld_IndianAssetsPatch_v3.zip"
 
           if [ ! -f "$PATCH" ]; then
-            echo "ERROR: Indian art patch v2 is missing."
+            echo "ERROR: Indian art patch v3 is missing."
             exit 1
           fi
 
           mkdir -p /tmp/bharat-indian-patch
           unzip -oq "$PATCH" -d /tmp/bharat-indian-patch
 
-          SCRIPT="/tmp/bharat-indian-patch/scripts/main.gd"
-          test -s "$SCRIPT"
+          test -s /tmp/bharat-indian-patch/scripts/main.gd
           test -s /tmp/bharat-indian-patch/project.godot
+          test -s /tmp/bharat-indian-patch/scenes/main.tscn
+          test -s /tmp/bharat-indian-patch/assets/indian/chai_stall.png
+          test -s /tmp/bharat-indian-patch/assets/indian/player_kurta.png
+          test -s /tmp/bharat-indian-patch/assets/indian/auto_rickshaw.png
           test -s /tmp/bharat-indian-patch/assets/indian/grass_tile.png
-          test -s /tmp/bharat-indian-patch/assets/indian/player_walk.png
-          test -s /tmp/bharat-indian-patch/assets/indian/house_terrace.png
 
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path("/tmp/bharat-indian-patch/scripts/main.gd")
-          content = p.read_text()
-
-          replacements = {
-              'var path := "res://assets/indian/" + art_name + ".png"':
-              'var path: String = "res://assets/indian/" + str(art_name) + ".png"',
-
-              'var tile_path := "res://assets/kenney_rpg_urban/Tiles/tile_%04d.png" % tile_id':
-              'var tile_path: String = "res://assets/kenney_rpg_urban/Tiles/tile_%04d.png" % int(tile_id)',
-
-              'var sound_path := "res://assets/audio/" + sound_name + ".ogg"':
-              'var sound_path: String = "res://assets/audio/" + str(sound_name) + ".ogg"',
-          }
-
-          for old, new in replacements.items():
-              if old in content:
-                  content = content.replace(old, new, 1)
-                  print("Fixed:", old.split("=")[0].strip())
-              elif new not in content:
-                  raise SystemExit("Expected script line not found: " + old)
-
-          p.write_text(content)
-          PY
-
-          cp "$SCRIPT" scripts/main.gd
+          cp /tmp/bharat-indian-patch/scripts/main.gd scripts/main.gd
           cp /tmp/bharat-indian-patch/project.godot project.godot
+          cp /tmp/bharat-indian-patch/scenes/main.tscn scenes/main.tscn
 
-          mkdir -p assets
-          cp -a /tmp/bharat-indian-patch/assets/. assets/
+          mkdir -p assets/indian
+          cp -a /tmp/bharat-indian-patch/assets/indian/. assets/indian/
 
-          python3 - <<'PY'
-          from pathlib import Path
+          echo "Indian art patch v3 applied."
 
-          p = Path("project.godot")
-          content = p.read_text()
-          setting = "textures/vram_compression/import_etc2_astc=true"
-
-          if setting not in content:
-              if "[rendering]" not in content:
-                  raise SystemExit("Missing [rendering] section")
-              content = content.replace(
-                  "[rendering]", "[rendering]\n" + setting, 1
-              )
-              p.write_text(content)
-
-          print("Android texture import setting verified.")
-          PY
-
-          echo "Indian art patch v2 applied with explicit script types."
   
       - name: Import project resources
         shell: bash
