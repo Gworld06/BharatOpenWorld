@@ -53,14 +53,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Android SDK: $ANDROID_HOME"
-          echo "Java SDK: $JAVA_HOME"
-
-          test -d "$ANDROID_HOME/platform-tools"
+          test -x "$ANDROID_HOME/platform-tools/adb"
           test -d "$ANDROID_HOME/platforms/android-34"
-          test -d "$ANDROID_HOME/build-tools/34.0.0"
+          test -x "$ANDROID_HOME/build-tools/34.0.0/apksigner"
 
           java -version
+          keytool -help >/dev/null 2>&1 || true
           sdkmanager --version
 
       - name: Set up Godot and export templates
@@ -70,35 +68,48 @@ jobs:
           use-dotnet: false
           include-templates: true
 
-      - name: Verify Godot installation
+      - name: Verify Godot export templates
         shell: bash
         run: |
           set -euo pipefail
 
           godot --version
 
-          test -d "$HOME/.local/share/godot/export_templates/4.3.stable"
+          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/4.3.stable"
 
-      - name: Configure Godot Android export
+          test -s "$TEMPLATE_DIR/android_debug.apk"
+          test -s "$TEMPLATE_DIR/android_release.apk"
+
+      - name: Configure Android signing
         shell: bash
         run: |
           set -euo pipefail
 
-          : "${ANDROID_HOME:?Android SDK path is missing}"
-          : "${JAVA_HOME:?Java SDK path is missing}"
-
-          mkdir -p "$HOME/.config/godot"
           mkdir -p "$HOME/.android"
 
-          keytool -genkeypair \
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -keypass android \
+              -alias androiddebugkey \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+          keytool -list \
             -keystore "$HOME/.android/debug.keystore" \
             -storepass android \
-            -keypass android \
-            -alias androiddebugkey \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
+            -alias androiddebugkey
+
+      - name: Configure Godot Android settings
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$HOME/.config/godot"
 
           cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
           [gd_resource type="EditorSettings" format=3]
@@ -111,8 +122,101 @@ jobs:
           export/android/debug_keystore_pass = "android"
           EOF
 
-          echo "Godot Android export settings configured."
+          test -x "$JAVA_HOME/bin/java"
+          test -d "$ANDROID_HOME/platform-tools"
           test -f "$HOME/.android/debug.keystore"
+
+      - name: Enable Android texture import support
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f project.godot
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("project.godot")
+          content = path.read_text()
+
+          setting = "textures/vram_compression/import_etc2_astc=true"
+
+          if setting not in content:
+              marker = "[rendering]"
+              if marker not in content:
+                  raise SystemExit("Missing [rendering] section in project.godot")
+
+              content = content.replace(
+                  marker,
+                  marker + "\n" + setting,
+                  1
+              )
+
+          path.write_text(content)
+          print("Android ETC2/ASTC texture import enabled.")
+          PY
+
+          grep -n "import_etc2_astc" project.godot
+
+      - name: Prepare Android export preset
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f export_presets.cfg
+
+          grep -q 'name="Android"' export_presets.cfg
+
+          # Remove SDK overrides that conflict with non-Gradle export.
+          sed -i \
+            '/^gradle_build\/min_sdk=/d; /^gradle_build\/target_sdk=/d' \
+            export_presets.cfg
+
+          # Use the generated debug signing key explicitly.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("export_presets.cfg")
+          content = path.read_text()
+
+          for key in (
+              "keystore/debug=",
+              "keystore/debug_user=",
+              "keystore/debug_password="
+          ):
+              content = "\n".join(
+                  line for line in content.split("\n")
+                  if not line.startswith(key)
+              )
+
+          marker = "[preset.0.options]"
+          if marker not in content:
+              raise SystemExit("Missing Android preset options section")
+
+          settings = (
+              'keystore/debug="/home/runner/.android/debug.keystore"\n'
+              'keystore/debug_user="androiddebugkey"\n'
+              'keystore/debug_password="android"\n'
+          )
+
+          content = content.replace(
+              marker,
+              marker + "\n" + settings.rstrip(),
+              1
+          )
+
+          path.write_text(content)
+          PY
+
+          cat export_presets.cfg
+
+      - name: Import project resources
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          godot --headless --path . --editor --import \
+            2>&1 | tee /tmp/godot-import.log
 
       - name: Verify project scripts
         shell: bash
@@ -125,35 +229,9 @@ jobs:
           if grep -E \
             "SCRIPT ERROR:|Parse Error:|Failed to load script" \
             /tmp/godot-verify.log; then
-            echo "Godot script verification failed."
+            echo "Project script verification failed."
             exit 1
           fi
-
-          echo "Project verification completed."
-
-      - name: Prepare Android export preset
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          test -f export_presets.cfg
-
-          if ! grep -q 'name="Android"' export_presets.cfg; then
-            echo "Android export preset was not found."
-            exit 1
-          fi
-
-          # Ensure the debug APK is signed for installation.
-          sed -i \
-            's/^package\/signed=false$/package\/signed=true/' \
-            export_presets.cfg
-
-          # SDK overrides require Gradle export in Godot 4.3.
-          sed -i \
-            '/^gradle_build\/min_sdk=/d; /^gradle_build\/target_sdk=/d' \
-            export_presets.cfg
-
-          echo "Android export preset checked."
 
       - name: Export Android debug APK
         shell: bash
@@ -178,13 +256,9 @@ jobs:
 
           test -s "$APK"
           file "$APK"
+          unzip -t "$APK"
 
-          if ! unzip -t "$APK"; then
-            echo "The exported APK is not a valid ZIP/APK archive."
-            exit 1
-          fi
-
-          echo "APK created successfully."
+          echo "APK archive verification passed."
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
