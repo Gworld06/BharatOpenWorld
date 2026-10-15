@@ -211,23 +211,34 @@ jobs:
           echo "Signing is enabled in the export preset."
 
       
-      - name: Apply Indian art asset patch
+      - 
+      - name: Apply Indian art asset patch v2
         shell: bash
         run: |
           set -euo pipefail
-          PATCH="BharatOpenWorld_IndianAssetsPatch.zip"
+          PATCH="BharatOpenWorld_IndianAssetsPatch_v2.zip"
+
           if [ ! -f "$PATCH" ]; then
-            echo "ERROR: Indian asset ZIP is missing."
+            echo "ERROR: Indian art patch v2 is missing."
             exit 1
           fi
+
           mkdir -p /tmp/bharat-indian-patch
           unzip -oq "$PATCH" -d /tmp/bharat-indian-patch
+
           test -s /tmp/bharat-indian-patch/scripts/main.gd
-          test -s /tmp/bharat-indian-patch/assets/indian/chai_stall.png
+          test -s /tmp/bharat-indian-patch/project.godot
+          test -s /tmp/bharat-indian-patch/assets/indian/grass_tile.png
+          test -s /tmp/bharat-indian-patch/assets/indian/player_walk.png
+          test -s /tmp/bharat-indian-patch/assets/indian/house_terrace.png
+          test -s /tmp/bharat-indian-patch/assets/kenney_rpg_urban/Tiles/tile_0420.png
+
           cp /tmp/bharat-indian-patch/scripts/main.gd scripts/main.gd
+          cp /tmp/bharat-indian-patch/project.godot project.godot
           mkdir -p assets
           cp -a /tmp/bharat-indian-patch/assets/. assets/
-          echo "Indian art asset patch applied."
+
+          echo "Indian art patch v2 applied."
   
       - name: Import project resources
         shell: bash
