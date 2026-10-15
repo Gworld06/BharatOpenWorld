@@ -58,7 +58,6 @@ jobs:
           test -x "$ANDROID_HOME/build-tools/34.0.0/apksigner"
 
           java -version
-          keytool -help >/dev/null 2>&1 || true
           sdkmanager --version
 
       - name: Set up Godot and export templates
@@ -68,7 +67,7 @@ jobs:
           use-dotnet: false
           include-templates: true
 
-      - name: Verify Godot export templates
+      - name: Verify Godot templates
         shell: bash
         run: |
           set -euo pipefail
@@ -80,7 +79,7 @@ jobs:
           test -s "$TEMPLATE_DIR/android_debug.apk"
           test -s "$TEMPLATE_DIR/android_release.apk"
 
-      - name: Configure Android signing
+      - name: Generate Android debug signing key
         shell: bash
         run: |
           set -euo pipefail
@@ -123,92 +122,93 @@ jobs:
           EOF
 
           test -x "$JAVA_HOME/bin/java"
-          test -d "$ANDROID_HOME/platform-tools"
+          test -x "$ANDROID_HOME/platform-tools/adb"
           test -f "$HOME/.android/debug.keystore"
 
-      - name: Enable Android texture import support
+      - name: Enable Android texture import
         shell: bash
         run: |
           set -euo pipefail
-
-          test -f project.godot
 
           python3 - <<'PY'
           from pathlib import Path
 
           path = Path("project.godot")
           content = path.read_text()
-
           setting = "textures/vram_compression/import_etc2_astc=true"
 
           if setting not in content:
               marker = "[rendering]"
               if marker not in content:
-                  raise SystemExit("Missing [rendering] section in project.godot")
+                  raise SystemExit("Missing [rendering] section")
 
               content = content.replace(
-                  marker,
-                  marker + "\n" + setting,
-                  1
+                  marker, marker + "\n" + setting, 1
               )
 
           path.write_text(content)
-          print("Android ETC2/ASTC texture import enabled.")
+          print("Android texture import setting enabled.")
           PY
 
-          grep -n "import_etc2_astc" project.godot
-
-      - name: Prepare Android export preset
+      - name: Prepare signed Android export preset
         shell: bash
         run: |
           set -euo pipefail
 
           test -f export_presets.cfg
-
           grep -q 'name="Android"' export_presets.cfg
 
-          # Remove SDK overrides that conflict with non-Gradle export.
+          # Remove unsupported SDK overrides for non-Gradle export.
           sed -i \
             '/^gradle_build\/min_sdk=/d; /^gradle_build\/target_sdk=/d' \
             export_presets.cfg
 
-          # Use the generated debug signing key explicitly.
+          # IMPORTANT: enable APK signing.
+          sed -i \
+            's/^package\/signed=false$/package\/signed=true/' \
+            export_presets.cfg
+
+          # Add explicit debug signing credentials.
           python3 - <<'PY'
           from pathlib import Path
 
           path = Path("export_presets.cfg")
           content = path.read_text()
-
-          for key in (
-              "keystore/debug=",
-              "keystore/debug_user=",
-              "keystore/debug_password="
-          ):
-              content = "\n".join(
-                  line for line in content.split("\n")
-                  if not line.startswith(key)
-              )
-
           marker = "[preset.0.options]"
-          if marker not in content:
-              raise SystemExit("Missing Android preset options section")
 
-          settings = (
-              'keystore/debug="/home/runner/.android/debug.keystore"\n'
-              'keystore/debug_user="androiddebugkey"\n'
-              'keystore/debug_password="android"\n'
-          )
+          if marker not in content:
+              raise SystemExit("Missing Android preset options")
+
+          keys = {
+              "keystore/debug=":
+                  'keystore/debug="/home/runner/.android/debug.keystore"',
+              "keystore/debug_user=":
+                  'keystore/debug_user="androiddebugkey"',
+              "keystore/debug_password=":
+                  'keystore/debug_password="android"',
+          }
+
+          lines = content.splitlines()
+          lines = [
+              line for line in lines
+              if not any(line.startswith(key) for key in keys)
+          ]
+
+          content = "\n".join(lines) + "\n"
+          settings = "\n".join(keys.values())
 
           content = content.replace(
-              marker,
-              marker + "\n" + settings.rstrip(),
-              1
+              marker, marker + "\n" + settings, 1
           )
 
           path.write_text(content)
           PY
 
-          cat export_presets.cfg
+          grep -q '^package/signed=true$' export_presets.cfg
+          grep -q '^keystore/debug="/home/runner/.android/debug.keystore"$' \
+            export_presets.cfg
+
+          echo "Signing is enabled in the export preset."
 
       - name: Import project resources
         shell: bash
@@ -233,7 +233,7 @@ jobs:
             exit 1
           fi
 
-      - name: Export Android debug APK
+      - name: Export signed Android debug APK
         shell: bash
         run: |
           set -euo pipefail
@@ -247,20 +247,23 @@ jobs:
 
           test -s build/BharatOpenWorld-debug.apk
 
-      - name: Verify APK
+      - name: Verify APK signature and archive
         shell: bash
         run: |
           set -euo pipefail
 
           APK="build/BharatOpenWorld-debug.apk"
+          APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
 
           test -s "$APK"
-          file "$APK"
           unzip -t "$APK"
 
-          echo "APK archive verification passed."
+          # Fail the workflow if the APK is unsigned or invalid.
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
 
-      - name: Upload APK
+          echo "APK archive and signature verification passed."
+
+      - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:
           name: BharatOpenWorld-debug-apk
