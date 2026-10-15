@@ -1,62 +1,65 @@
 name: Build Android APK
 
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
+workflow_dispatch:
+push:
+branches:
+- main
 
 permissions:
-  contents: read
+contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+build:
+runs-on: ubuntu-22.04
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+steps:
+  - name: Checkout
+    uses: actions/checkout@v4
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
+  - name: Set up Java
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: "17"
 
-      -       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          cmdline-tools-version: 12266719
+  - name: Set up Android SDK
+    uses: android-actions/setup-android@v3
+    with:
+      cmdline-tools-version: 12266719
 
-      - name: Install Android SDK packages
-        run: sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+  - name: Install Android SDK packages
+    run: |
+      yes | sdkmanager --licenses
+      sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Set up Godot
-        uses: chickensoft-games/setup-godot@v2
-        with:
-          version: 4.3.0
-          use-dotnet: false
+  - name: Set up Godot
+    uses: chickensoft-games/setup-godot@v2
+    with:
+      version: 4.3.0
+      use-dotnet: false
 
-      - name: Install Godot export templates
-        run: |
-          mkdir -p "$HOME/.local/share/godot/export_templates/4.3.stable"
-          curl -L --fail --retry 3 "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz" -o /tmp/templates.tpz
-          mkdir -p /tmp/godot-templates
-          unzip -q /tmp/templates.tpz -d /tmp/godot-templates
-          cp -a /tmp/godot-templates/templates/. "$HOME/.local/share/godot/export_templates/4.3.stable/"
+  - name: Install Godot export templates
+    shell: bash
+    run: |
+      mkdir -p "$HOME/.local/share/godot/export_templates/4.3.stable"
+      curl -fL --retry 3 "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz" -o /tmp/templates.tpz
+      mkdir -p /tmp/godot-templates
+      unzip -q /tmp/templates.tpz -d /tmp/godot-templates
+      cp -a /tmp/godot-templates/templates/. "$HOME/.local/share/godot/export_templates/4.3.stable/"
 
-      - name: Verify project
-        run: godot --headless --path . --editor --quit
+  - name: Verify project
+    run: godot --headless --path . --editor --quit
 
-      - name: Export debug APK
-        run: |
-          mkdir -p build
-          godot --headless --path . --export-debug "Android" build/BharatOpenWorld-debug.apk
+  - name: Export debug APK
+    run: |
+      mkdir -p build
+      godot --headless --path . --export-debug "Android" build/BharatOpenWorld-debug.apk
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: BharatOpenWorld-debug-apk
-          path: build/BharatOpenWorld-debug.apk
-          if-no-files-found: error
-          retention-days: 14
+  - name: Upload APK
+    uses: actions/upload-artifact@v4
+    with:
+      name: BharatOpenWorld-debug-apk
+      path: build/BharatOpenWorld-debug.apk
+      if-no-files-found: error
+      retention-days: 14
