@@ -211,7 +211,6 @@ jobs:
           echo "Signing is enabled in the export preset."
 
       
-      - 
       - name: Apply Indian art asset patch v2
         shell: bash
         run: |
@@ -235,10 +234,31 @@ jobs:
 
           cp /tmp/bharat-indian-patch/scripts/main.gd scripts/main.gd
           cp /tmp/bharat-indian-patch/project.godot project.godot
+
           mkdir -p assets
           cp -a /tmp/bharat-indian-patch/assets/. assets/
 
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("project.godot")
+          content = p.read_text()
+          setting = "textures/vram_compression/import_etc2_astc=true"
+
+          if setting not in content:
+              marker = "[rendering]"
+              if marker not in content:
+                  raise SystemExit("Missing [rendering] section")
+              content = content.replace(
+                  marker, marker + "\n" + setting, 1
+              )
+              p.write_text(content)
+
+          print("Android texture import setting verified.")
+          PY
+
           echo "Indian art patch v2 applied."
+
   
       - name: Import project resources
         shell: bash
