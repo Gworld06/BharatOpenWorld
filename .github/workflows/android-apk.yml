@@ -3,7 +3,8 @@ name: Build Android APK
 on:
 workflow_dispatch:
 push:
-branches: ["main"]
+branches:
+- main
 
 permissions:
 contents: read
@@ -36,9 +37,7 @@ uses: actions/checkout@v4
   - name: Install Godot export templates
     run: |
       mkdir -p "$HOME/.local/share/godot/export_templates/4.3.stable"
-      curl -L --fail --retry 3 \
-        https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz \
-        -o /tmp/templates.tpz
+      curl -L --fail --retry 3 "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz" -o /tmp/templates.tpz
       mkdir -p /tmp/godot-templates
       unzip -q /tmp/templates.tpz -d /tmp/godot-templates
       cp -a /tmp/godot-templates/templates/. "$HOME/.local/share/godot/export_templates/4.3.stable/"
