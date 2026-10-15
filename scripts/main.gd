@@ -249,7 +249,7 @@ func _draw_world() -> void:
         var b: Rect2 = buildings[i]
         draw_rect(b.grow(12), Color("#9a8a67"))
         draw_rect(Rect2(b.position + Vector2(5, 7), b.size), Color("#5b473d"))
-        var roof_color := [Color("#b64e3e"), Color("#d9a75c"), Color("#737d91"), Color("#9a6655")][i % 4]
+        var roof_color: Color = [Color("#b64e3e"), Color("#d9a75c"), Color("#737d91"), Color("#9a6655")][i % 4]
         draw_rect(Rect2(b.position, b.size), roof_color)
         for xx in range(int(b.position.x)+8, int(b.end.x)-5, 16):
             draw_line(Vector2(xx, b.position.y+4), Vector2(xx, b.end.y-4), roof_color.darkened(0.12), 2)
